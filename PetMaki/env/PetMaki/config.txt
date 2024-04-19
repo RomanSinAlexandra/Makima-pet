@@ -1,0 +1,18 @@
+#time alarm
+02:00:00
+#repeat alarm count
+3
+#play alarm
+0
+#media alarm path
+resources\sound\i_can't_believe_youre_clowning_around_at_a_time_like_this_Makima.mp3
+#background alarm
+resources/background/background_alarm.jpg
+#background timer
+resources/background/Makima_timer.jpg
+#background popup/tray menu
+resources/background/MakimaBackground.png
+#background audio player
+resources/background/background_audio.jpg
+#background night audio player
+resources/background/Calm.jpg
