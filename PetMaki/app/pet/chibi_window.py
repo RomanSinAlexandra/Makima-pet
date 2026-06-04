@@ -1,5 +1,6 @@
 import os
 import random
+import json
 from PyQt6.QtWidgets import (QMainWindow, QLabel, QGraphicsColorizeEffect, QInputDialog, QApplication)
 from PyQt6.QtCore import Qt, QTimer, QPoint, QSize, QDateTime, QUrl, QTime
 from PyQt6.QtGui import QMovie, QPainter, QColor, QPixmap
@@ -81,7 +82,8 @@ class ChibiPet(QMainWindow):
         self.countdown_timer.timeout.connect(self.tick_timer)
 
         # Инициализация первого скина (Загрузит Макиму по умолчанию)
-        self.load_skin("Makima")
+        saved_skin = self.load_config()
+        self.load_skin(saved_skin)
         self.update_widget_geometries()
         
         # Анимация появления
@@ -100,8 +102,40 @@ class ChibiPet(QMainWindow):
 
         self.show()
 
+
+    def load_config(self):
+        """Загрузка сохраненного скина и настроек из файла config.json"""
+        self.config_path = os.path.join(self.logic.script_dir, "config.json")
+        
+        if os.path.exists(self.config_path):
+            try:
+                with open(self.config_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    # Восстанавливаем режим демона
+                    self.logic.demon_mode = config.get("demon_mode", False)
+                    # Возвращаем имя сохраненного скина
+                    return config.get("current_skin", "Makima")
+            except Exception as e:
+                print(f"Ошибка при чтении конфига: {e}")
+        
+        # Если файла нет или он поврежден, возвращаем дефолтную Макиму
+        return "Makima"
+
+    def save_config(self):
+        """Сохранение текущего скина и состояния в файл config.json"""
+        try:
+            config = {
+                "current_skin": self.logic.current_skin_name,
+                "demon_mode": self.logic.demon_mode
+            }
+            with open(self.config_path, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"Ошибка при сохранении конфига: {e}")
+
     def load_skin(self, skin_name):
         """Загрузка конфигурации текстур и звуков из директории скина"""
+        self.logic.current_skin_name = skin_name
         paths = self.logic.get_skin_paths(skin_name)
 
         print(f"Проверка пути idle.gif для {skin_name}: {paths['idle']} -> Существует: {os.path.exists(paths['idle'])}")
@@ -116,13 +150,11 @@ class ChibiPet(QMainWindow):
         self.movie_jump = QMovie(paths["jump"]) if os.path.exists(paths["jump"]) else QMovie(paths["idle"])
         self.movie_demon_jump = QMovie(paths["demon_jump"]) if os.path.exists(paths["demon_jump"]) else self.movie_jump
         
-        # ИСПРАВЛЕНИЕ: Теперь анимации злости динамически загружаются из путей выбранного скина
         self.movie_angry = QMovie(paths["angry"]) if os.path.exists(paths["angry"]) else QMovie(paths["idle"])
         self.movie_demon_angry = QMovie(paths["demon_angry"]) if os.path.exists(paths["demon_angry"]) else self.movie_angry
         
         self.menu_bg_path = paths["menu_bg"]
         
-        # ИСПРАВЛЕНИЕ: Добавлены новые фильмы злости в пул для контроля и ресайза
         self.all_movies = [
             self.movie_start, self.movie_idle, self.movie_walk, 
             self.movie_demon_start, self.movie_demon_idle, self.movie_demon_walk,
@@ -134,14 +166,26 @@ class ChibiPet(QMainWindow):
             if m and m.isValid(): 
                 m.setScaledSize(self.base_movie_size)
 
-        if self.logic.state is not None:
-            old_state = self.logic.state
-            self.logic.state = None 
-            self.set_state('idle' if old_state in ['start', 'demon_start'] else old_state, self.logic.direction)
+        # === ИЗМЕНЕНО: Анимация СТАРТА при смене скина ===
+        # Сбрасываем старое состояние, чтобы принудительно обновить анимацию
+        self.logic.state = None 
+        
+        # Определяем, какой старт включать (обычный или демонический)
+        target_start = 'demon_start' if self.logic.demon_mode else 'start'
+        self.set_state(target_start, self.logic.direction)
+        
+        # Через 2 секунды (2000 мс) плавно переводим в idle
+        QTimer.singleShot(2000, lambda: self.set_state('idle', self.logic.direction) if self.logic.state in ['start', 'demon_start'] else None)
+        
+        # Подгоняем размеры окна под новый скин (на случай, если разрешения гифок разные)
+        QTimer.singleShot(100, self.adjust_size_to_movie)
+        # ================================================
 
         if hasattr(self, 'menu') and self.menu:
             self.menu.menu_bg_path = self.menu_bg_path
             self.menu.init_stylesheet()
+
+        self.save_config()
 
     def play_random_sound(self):
         if self.logic.sound_files:
@@ -270,6 +314,8 @@ class ChibiPet(QMainWindow):
             QTimer.singleShot(2000, lambda: self.set_state('idle', self.logic.direction) if self.logic.state == 'demon_start' else None)
         else: 
             self.set_state('idle', self.logic.direction)
+
+        self.save_config()
 
     def set_state(self, new_state, direction=1):
         if self.logic.state == new_state and self.logic.direction == direction: return 
